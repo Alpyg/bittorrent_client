@@ -35,15 +35,23 @@ fn main() -> anyhow::Result<()> {
                 serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
 
             println!("Tracker URL: {}", t.announce);
+
             if let Keys::SingleFile { length } = t.info.keys {
                 println!("Length: {length}")
             }
+
             let info_encoded =
                 serde_bencode::to_bytes(&t.info).context("re-encode into section")?;
             let mut hasher = Sha1::new();
             hasher.update(&info_encoded);
             let info_hash = hasher.finalize();
             println!("Info Hash: {}", hex::encode(&info_hash));
+
+            println!("Piece Length: {}", t.info.piece_length);
+            println!("Piece Hashes:");
+            for hash in t.info.pieces.0 {
+                println!("{}", hex::encode(&hash));
+            }
         }
     }
 
