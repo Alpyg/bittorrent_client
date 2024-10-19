@@ -1,72 +1,44 @@
-use serde_json;
-use std::env;
+use anyhow::Context;
+use clap::{Parser, Subcommand};
+use torrent::{Keys, Torrent};
 
-#[allow(dead_code)]
-fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
-    match encoded_value.chars().next() {
-        Some('i') => {
-            if let Some((n, rest)) =
-                encoded_value
-                    .split_at(1)
-                    .1
-                    .split_once('e')
-                    .and_then(|(digits, rest)| {
-                        let n = digits.parse::<i64>().ok()?;
-                        Some((n, rest))
-                    })
-            {
-                return (n.into(), rest);
-            }
-        }
-        Some('l') => {
-            let mut values = Vec::new();
-            let mut rest = encoded_value.split_at(1).1;
-            while !rest.is_empty() && !rest.starts_with('e') {
-                let (v, remainder) = decode_bencoded_value(rest);
-                values.push(v);
-                rest = remainder;
-            }
-            return (values.into(), &rest[1..]);
-        }
-        Some('d') => {
-            let mut dict = serde_json::Map::new();
-            let mut rest = encoded_value.split_at(1).1;
-            while !rest.is_empty() && !rest.starts_with('e') {
-                let (k, remainder) = decode_bencoded_value(rest);
-                let k = match k {
-                    serde_json::Value::String(k) => k,
-                    k => {
-                        panic!("dict keys must be string, not {k:?}");
-                    }
-                };
-                let (v, remainder) = decode_bencoded_value(remainder);
-                dict.insert(k, v);
-                rest = remainder;
-            }
-            return (dict.into(), &rest[1..]);
-        }
-        Some('0'..='9') => {
-            if let Some((len, rest)) = encoded_value.split_once(':') {
-                if let Ok(len) = len.parse::<usize>() {
-                    return (rest[..len].to_string().into(), &rest[len..]);
-                }
-            }
-        }
-        _ => {}
-    }
+use std::path::PathBuf;
 
-    panic!("Unhandled encoded value: {}", encoded_value)
+mod bencode;
+mod torrent;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Command,
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let command = &args[1];
+#[derive(Subcommand, Debug)]
+enum Command {
+    Decode { value: String },
+    Info { torrent: PathBuf },
+}
 
-    if command == "decode" {
-        let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.0.to_string());
-    } else {
-        println!("unknown command: {}", args[1])
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
+    match args.command {
+        Command::Decode { value } => {
+            let v = bencode::decode_bencoded_value(&value).0;
+            println!("{v}");
+        }
+        Command::Info { torrent } => {
+            let dot_torrent = std::fs::read(torrent).context("read torrent file")?;
+            let t: Torrent =
+                serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+
+            println!("Tracker URL: {}", t.announce);
+            if let Keys::SingleFile { length } = t.info.keys {
+                println!("Length: {length}")
+            }
+        }
     }
+
+    Ok(())
 }
