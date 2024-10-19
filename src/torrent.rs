@@ -1,12 +1,12 @@
 use serde::{
     de::{self, Visitor},
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize,
 };
 use std::fmt;
 
 /// Metainfo files (also known as .torrent files)
 #[allow(unused)]
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Torrent {
     /// The URL of the tracker.
     pub announce: String,
@@ -15,8 +15,56 @@ pub struct Torrent {
 }
 
 #[allow(unused)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Info {
+    /// The suggested name to save the file (or directory) as.
+    pub name: String,
+
+    /// The length maps to the number of bytes in each piece the file is split into. For the
+    /// purposes of transfer, files are split into fixed-size pieces which are all the same length
+    /// except for possibly the last one which may be truncated. piece length is almost always a
+    /// power of two, most commonly 2 18 = 256 K (BitTorrent prior to version 3.2 uses 2 20 = 1 M
+    /// as default).
+    #[serde(rename = "piece length")]
+    pub piece_length: usize,
+
+    /// Each entry of `pieces` is the SHA1 hash of the piece at the corresponding index.
+    pub pieces: Hashes,
+
+    #[serde(flatten)]
+    pub keys: Keys,
+}
+
+/// There is a key `length` or a key `files`, but not both or neither.
+#[allow(unused)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Keys {
+    /// If `length` is present then the download represents a single file.
+    SingleFile {
+        /// The length of the file in bytes.
+        length: usize,
+    },
+    /// Otherwise it represents a set of files which go in a directory structure.
+    ///
+    /// For the purposes of the other keys in `Info`, the multi-file case is treated as only having
+    /// a single file by concatenating the files in the order they appear in the files list.
+    MultiFile { files: Vec<File> },
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct File {
+    /// The length of the file, in bytes.
+    pub length: usize,
+    /// A list of UTF-8 encoded strings corresponding to subdirectory names, the last of which is
+    /// the actual file name (a zero length list is an error case).
+    pub path: Vec<String>,
+}
+
+#[allow(unused)]
 #[derive(Debug, Clone)]
-pub struct Hashes(Vec<[u8; 20]>);
+pub struct Hashes(pub Vec<[u8; 20]>);
 struct HashesVisitor;
 
 impl<'de> Visitor<'de> for HashesVisitor {
@@ -51,50 +99,12 @@ impl<'de> Deserialize<'de> for Hashes {
     }
 }
 
-#[allow(unused)]
-#[derive(Deserialize, Debug, Clone)]
-pub struct Info {
-    /// The suggested name to save the file (or directory) as.
-    pub name: String,
-
-    /// The length maps to the number of bytes in each piece the file is split into. For the
-    /// purposes of transfer, files are split into fixed-size pieces which are all the same length
-    /// except for possibly the last one which may be truncated. piece length is almost always a
-    /// power of two, most commonly 2 18 = 256 K (BitTorrent prior to version 3.2 uses 2 20 = 1 M
-    /// as default).
-    #[serde(rename = "piece length")]
-    pub piece_length: usize,
-
-    /// Each entry of `pieces` is the SHA1 hash of the piece at the corresponding index.
-    pub pieces: Hashes,
-
-    #[serde(flatten)]
-    pub keys: Keys,
-}
-
-/// There is a key `length` or a key `files`, but not both or neither.
-#[allow(unused)]
-#[derive(Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum Keys {
-    /// If `length` is present then the download represents a single file.
-    SingleFile {
-        /// The length of the file in bytes.
-        length: usize,
-    },
-    /// Otherwise it represents a set of files which go in a directory structure.
-    ///
-    /// For the purposes of the other keys in `Info`, the multi-file case is treated as only having
-    /// a single file by concatenating the files in the order they appear in the files list.
-    MultiFile { files: Vec<File> },
-}
-
-#[allow(unused)]
-#[derive(Deserialize, Debug, Clone)]
-pub struct File {
-    /// The length of the file, in bytes.
-    pub length: usize,
-    /// A list of UTF-8 encoded strings corresponding to subdirectory names, the last of which is
-    /// the actual file name (a zero length list is an error case).
-    pub path: Vec<String>,
+impl Serialize for Hashes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let single_slice = self.0.concat();
+        serializer.serialize_bytes(&single_slice)
+    }
 }

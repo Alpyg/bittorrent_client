@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use sha1::{Digest, Sha1};
 use torrent::{Keys, Torrent};
 
 use std::path::PathBuf;
@@ -37,6 +38,12 @@ fn main() -> anyhow::Result<()> {
             if let Keys::SingleFile { length } = t.info.keys {
                 println!("Length: {length}")
             }
+            let info_encoded =
+                serde_bencode::to_bytes(&t.info).context("re-encode into section")?;
+            let mut hasher = Sha1::new();
+            hasher.update(&info_encoded);
+            let info_hash = hasher.finalize();
+            println!("Info Hash: {}", hex::encode(&info_hash));
         }
     }
 
