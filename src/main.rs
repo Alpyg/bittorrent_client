@@ -28,6 +28,23 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
             }
             return (values.into(), &rest[1..]);
         }
+        Some('d') => {
+            let mut dict = serde_json::Map::new();
+            let mut rest = encoded_value.split_at(1).1;
+            while !rest.is_empty() && !rest.starts_with('e') {
+                let (k, remainder) = decode_bencoded_value(rest);
+                let k = match k {
+                    serde_json::Value::String(k) => k,
+                    k => {
+                        panic!("dict keys must be string, not {k:?}");
+                    }
+                };
+                let (v, remainder) = decode_bencoded_value(remainder);
+                dict.insert(k, v);
+                rest = remainder;
+            }
+            return (dict.into(), &rest[1..]);
+        }
         Some('0'..='9') => {
             if let Some((len, rest)) = encoded_value.split_once(':') {
                 if let Ok(len) = len.parse::<usize>() {
@@ -41,7 +58,6 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
     panic!("Unhandled encoded value: {}", encoded_value)
 }
 
-// Usage: your_bittorrent.sh decode "<encoded_value>"
 fn main() {
     let args: Vec<String> = env::args().collect();
     let command = &args[1];
